@@ -317,3 +317,55 @@ async def test_test_coverage_review_activity_returns_none_when_breaker_open(monk
     result = await activities.test_coverage_review_activity(activities.ReviewInput(diff_text="diff-content"))
 
     assert result is None
+
+
+async def test_check_demo_failure_injection_activity_returns_false_by_default(monkeypatch):
+    monkeypatch.delenv("PRBOT_DEMO_FORCE_FAILURE_AFTER_POST", raising=False)
+
+    result = await activities.check_demo_failure_injection_activity()
+
+    assert result is False
+
+
+async def test_check_demo_failure_injection_activity_returns_true_when_set(monkeypatch):
+    monkeypatch.setenv("PRBOT_DEMO_FORCE_FAILURE_AFTER_POST", "true")
+
+    result = await activities.check_demo_failure_injection_activity()
+
+    assert result is True
+
+
+async def test_delete_comment_activity_calls_apis_in_order(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("dummy-key")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    calls = []
+
+    def fake_generate_app_jwt(app_id, key):
+        calls.append(("jwt", app_id))
+        return "fake.jwt"
+
+    async def fake_get_installation_token(app_jwt, installation_id):
+        calls.append(("token", app_jwt, installation_id))
+        return "ghs_token"
+
+    async def fake_delete_pr_comment(token, owner, repo, comment_id):
+        calls.append(("delete", token, owner, repo, comment_id))
+
+    monkeypatch.setattr(activities.github_client, "generate_app_jwt", fake_generate_app_jwt)
+    monkeypatch.setattr(activities.github_client, "get_installation_token", fake_get_installation_token)
+    monkeypatch.setattr(activities.github_client, "delete_pr_comment", fake_delete_pr_comment)
+
+    await activities.delete_comment_activity(
+        activities.DeleteCommentInput(installation_id="55", owner="chitaki10", repo="demo", comment_id=42)
+    )
+
+    assert calls == [
+        ("jwt", "1"),
+        ("token", "fake.jwt", "55"),
+        ("delete", "ghs_token", "chitaki10", "demo", 42),
+    ]

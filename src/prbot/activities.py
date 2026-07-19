@@ -1,10 +1,11 @@
+import os
 from pathlib import Path
 
 import pybreaker
 from temporalio import activity
 
 from prbot import db, github_client, llm_client
-from prbot.activity_types import AggregateInput, FetchDiffInput, PostCommentInput, ReviewInput, SetStatusInput, StalenessCheckInput
+from prbot.activity_types import AggregateInput, DeleteCommentInput, FetchDiffInput, PostCommentInput, ReviewInput, SetStatusInput, StalenessCheckInput
 from prbot.config import get_settings
 
 
@@ -139,3 +140,15 @@ async def check_staleness_activity(input: StalenessCheckInput) -> bool:
     token = await github_client.get_installation_token(app_jwt, input.installation_id)
     current_head_sha = await github_client.get_pr_head_sha(token, input.owner, input.repo, input.pr_number)
     return current_head_sha != input.head_sha
+
+
+@activity.defn
+async def check_demo_failure_injection_activity() -> bool:
+    return os.environ.get("PRBOT_DEMO_FORCE_FAILURE_AFTER_POST", "").lower() == "true"
+
+
+@activity.defn
+async def delete_comment_activity(input: DeleteCommentInput) -> None:
+    app_jwt = _generate_jwt()
+    token = await github_client.get_installation_token(app_jwt, input.installation_id)
+    await github_client.delete_pr_comment(token, input.owner, input.repo, input.comment_id)

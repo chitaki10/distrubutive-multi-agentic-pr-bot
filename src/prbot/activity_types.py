@@ -45,3 +45,11 @@ class StalenessCheckInput:
     repo: str
     pr_number: int
     head_sha: str
+
+
+@dataclass
+class DeleteCommentInput:
+    installation_id: str
+    owner: str
+    repo: str
+    comment_id: int

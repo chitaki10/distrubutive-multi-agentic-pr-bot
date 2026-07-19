@@ -1,7 +1,7 @@
 import httpx
 import respx
 
-from prbot.github_client import fetch_pr_diff, get_pr_head_sha, post_pr_comment
+from prbot.github_client import delete_pr_comment, fetch_pr_diff, get_pr_head_sha, post_pr_comment
 
 
 @respx.mock
@@ -37,3 +37,14 @@ async def test_get_pr_head_sha_returns_current_head_sha():
     result = await get_pr_head_sha("ghs_token", "chitaki10", "demo", 7)
 
     assert result == "newsha123"
+
+
+@respx.mock
+async def test_delete_pr_comment_sends_delete_request():
+    route = respx.delete("https://api.github.com/repos/chitaki10/demo/issues/comments/42").mock(
+        return_value=httpx.Response(204)
+    )
+
+    await delete_pr_comment("ghs_token", "chitaki10", "demo", 42)
+
+    assert route.called

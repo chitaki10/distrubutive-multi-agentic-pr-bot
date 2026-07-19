@@ -74,3 +74,13 @@ async def get_pr_head_sha(
         response = await client.get(url, headers=headers)
         response.raise_for_status()
         return response.json()["head"]["sha"]
+
+
+async def delete_pr_comment(
+    token: str, owner: str, repo: str, comment_id: int, base_url: str = "https://api.github.com"
+) -> None:
+    url = f"{base_url}/repos/{owner}/{repo}/issues/comments/{comment_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(url, headers=headers)
+        response.raise_for_status()
