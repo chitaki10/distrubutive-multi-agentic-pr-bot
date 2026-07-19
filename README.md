@@ -9,7 +9,7 @@ Built stage by stage; each stage is demoable on its own.
 - ✅ **Stage 0 — Scaffold**: repo layout, Postgres via docker-compose.
 - ✅ **Stage 1 — Vertical slice**: GitHub App + webhook + one hardcoded Ollama review call → real PR comment posted end-to-end.
 - ✅ **Stage 2 — Temporal durability**: webhook fast-acks by starting a Temporal workflow instead of blocking; a separate worker process runs the review pipeline as retryable activities, with status tracked in Postgres (`pending → running → complete/failed`). Kill the worker mid-review and restart it — the review resumes and still posts.
-- ⏳ **Stage 3 — Multi-agent review**: LangGraph supervisor fans out to Security / Style-Lint / Test-Coverage agents, an aggregator merges results into one comment.
+   **Stage 3 — Multi-agent review**: LangGraph supervisor fans out to Security / Style-Lint / Test-Coverage agents, an aggregator merges results into one comment.
 - ⏳ **Stage 4 — Staleness handling**: a force-push mid-review discards the stale run instead of posting an outdated comment.
 - ⏳ **Stage 5 — Circuit breaker**: a repeatedly-failing agent gets skipped rather than hanging the whole review.
 - ⏳ **Stage 6 — Saga/compensation**: a broken partial review gets automatically edited/deleted rather than left visible.
