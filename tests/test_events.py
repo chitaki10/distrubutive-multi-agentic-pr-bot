@@ -35,5 +35,20 @@ def test_parse_pull_request_event_extracts_fields_on_opened():
     )
 
 
+def test_parse_pull_request_event_extracts_fields_on_synchronize():
+    payload = {
+        "action": "synchronize",
+        "pull_request": {"number": 7, "head": {"sha": "abc123"}},
+        "repository": {"name": "demo", "owner": {"login": "chitaki10"}},
+        "installation": {"id": 55},
+    }
+
+    event = parse_pull_request_event(payload)
+
+    assert event == PullRequestEvent(
+        owner="chitaki10", repo="demo", pr_number=7, head_sha="abc123", installation_id="55"
+    )
+
+
 def test_parse_pull_request_event_returns_none_for_other_actions():
     assert parse_pull_request_event({"action": "closed"}) is None
