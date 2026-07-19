@@ -3,7 +3,7 @@ from pathlib import Path
 from temporalio import activity
 
 from prbot import db, github_client, llm_client
-from prbot.activity_types import AggregateInput, FetchDiffInput, PostCommentInput, ReviewInput, SetStatusInput
+from prbot.activity_types import AggregateInput, FetchDiffInput, PostCommentInput, ReviewInput, SetStatusInput, StalenessCheckInput
 from prbot.config import get_settings
 
 
@@ -95,3 +95,11 @@ async def aggregate_activity(input: AggregateInput) -> str:
         else:
             parts.append(f"### {title}\n\n{result}")
     return "\n\n".join(parts)
+
+
+@activity.defn
+async def check_staleness_activity(input: StalenessCheckInput) -> bool:
+    app_jwt = _generate_jwt()
+    token = await github_client.get_installation_token(app_jwt, input.installation_id)
+    current_head_sha = await github_client.get_pr_head_sha(token, input.owner, input.repo, input.pr_number)
+    return current_head_sha != input.head_sha

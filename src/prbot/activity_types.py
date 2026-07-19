@@ -36,3 +36,12 @@ class AggregateInput:
     security_result: str | None
     style_result: str | None
     test_coverage_result: str | None
+
+
+@dataclass
+class StalenessCheckInput:
+    installation_id: str
+    owner: str
+    repo: str
+    pr_number: int
+    head_sha: str

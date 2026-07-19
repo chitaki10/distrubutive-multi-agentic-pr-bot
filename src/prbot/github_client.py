@@ -60,3 +60,17 @@ async def post_pr_comment(
         response = await client.post(url, headers=headers, json={"body": body})
         response.raise_for_status()
         return response.json()["id"]
+
+
+async def get_pr_head_sha(
+    token: str, owner: str, repo: str, pr_number: int, base_url: str = "https://api.github.com"
+) -> str:
+    url = f"{base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        return response.json()["head"]["sha"]

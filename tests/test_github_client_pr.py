@@ -1,7 +1,7 @@
 import httpx
 import respx
 
-from prbot.github_client import fetch_pr_diff, post_pr_comment
+from prbot.github_client import fetch_pr_diff, get_pr_head_sha, post_pr_comment
 
 
 @respx.mock
@@ -26,3 +26,14 @@ async def test_post_pr_comment_returns_comment_id():
     assert comment_id == 42
     sent_body = route.calls.last.request.content
     assert b"nice PR" in sent_body
+
+
+@respx.mock
+async def test_get_pr_head_sha_returns_current_head_sha():
+    respx.get("https://api.github.com/repos/chitaki10/demo/pulls/7").mock(
+        return_value=httpx.Response(200, json={"head": {"sha": "newsha123"}})
+    )
+
+    result = await get_pr_head_sha("ghs_token", "chitaki10", "demo", 7)
+
+    assert result == "newsha123"

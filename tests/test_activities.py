@@ -194,3 +194,63 @@ async def test_aggregate_activity_notes_skipped_agent():
 
     assert "### Security" in result
     assert "skipped" in result.lower()
+
+
+async def test_check_staleness_activity_returns_true_when_head_sha_differs(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("dummy-key")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    def fake_generate_app_jwt(app_id, key):
+        return "fake.jwt"
+
+    async def fake_get_installation_token(app_jwt, installation_id):
+        return "ghs_token"
+
+    async def fake_get_pr_head_sha(token, owner, repo, pr_number):
+        return "new-sha"
+
+    monkeypatch.setattr(activities.github_client, "generate_app_jwt", fake_generate_app_jwt)
+    monkeypatch.setattr(activities.github_client, "get_installation_token", fake_get_installation_token)
+    monkeypatch.setattr(activities.github_client, "get_pr_head_sha", fake_get_pr_head_sha)
+
+    result = await activities.check_staleness_activity(
+        activities.StalenessCheckInput(
+            installation_id="55", owner="chitaki10", repo="demo", pr_number=7, head_sha="old-sha"
+        )
+    )
+
+    assert result is True
+
+
+async def test_check_staleness_activity_returns_false_when_head_sha_matches(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("dummy-key")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    def fake_generate_app_jwt(app_id, key):
+        return "fake.jwt"
+
+    async def fake_get_installation_token(app_jwt, installation_id):
+        return "ghs_token"
+
+    async def fake_get_pr_head_sha(token, owner, repo, pr_number):
+        return "same-sha"
+
+    monkeypatch.setattr(activities.github_client, "generate_app_jwt", fake_generate_app_jwt)
+    monkeypatch.setattr(activities.github_client, "get_installation_token", fake_get_installation_token)
+    monkeypatch.setattr(activities.github_client, "get_pr_head_sha", fake_get_pr_head_sha)
+
+    result = await activities.check_staleness_activity(
+        activities.StalenessCheckInput(
+            installation_id="55", owner="chitaki10", repo="demo", pr_number=7, head_sha="same-sha"
+        )
+    )
+
+    assert result is False
