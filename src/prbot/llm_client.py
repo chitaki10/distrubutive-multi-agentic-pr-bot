@@ -7,12 +7,12 @@ REVIEW_SYSTEM_PROMPT = (
 )
 
 
-async def review_diff(diff_text: str, base_url: str, model: str) -> str:
+async def review_diff_with_prompt(diff_text: str, base_url: str, model: str, system_prompt: str) -> str:
     url = f"{base_url}/v1/chat/completions"
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": diff_text},
         ],
         "stream": False,
@@ -21,3 +21,7 @@ async def review_diff(diff_text: str, base_url: str, model: str) -> str:
         response = await client.post(url, json=payload)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+
+
+async def review_diff(diff_text: str, base_url: str, model: str) -> str:
+    return await review_diff_with_prompt(diff_text, base_url, model, REVIEW_SYSTEM_PROMPT)
