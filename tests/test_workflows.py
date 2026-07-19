@@ -6,6 +6,7 @@ from temporalio.worker import Worker
 
 from prbot.activity_types import (
     AggregateInput,
+    DeleteCommentInput,
     FetchDiffInput,
     PostCommentInput,
     ReviewInput,
@@ -39,7 +40,7 @@ def _agent_fakes(calls):
     return [fake_security, fake_style, fake_test_coverage, fake_aggregate]
 
 
-async def test_workflow_posts_when_not_stale():
+async def test_workflow_completes_normally_when_no_failure_injected():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         calls = []
 
@@ -62,26 +63,100 @@ async def test_workflow_posts_when_not_stale():
             calls.append(("post_comment", input.body))
             return 42
 
+        @activity.defn(name="check_demo_failure_injection_activity")
+        async def fake_check_failure_injection() -> bool:
+            calls.append(("check_failure_injection",))
+            return False
+
+        @activity.defn(name="delete_comment_activity")
+        async def unused_delete_comment(input: DeleteCommentInput) -> None:
+            raise AssertionError("should not be called when no failure is injected")
+
         async with Worker(
             env.client,
-            task_queue="test-queue-4-1",
+            task_queue="test-queue-6-1",
             workflows=[PRReviewWorkflow],
-            activities=[fake_set_status, fake_fetch_diff, *_agent_fakes(calls), fake_check_staleness, fake_post_comment],
+            activities=[
+                fake_set_status,
+                fake_fetch_diff,
+                *_agent_fakes(calls),
+                fake_check_staleness,
+                fake_post_comment,
+                fake_check_failure_injection,
+                unused_delete_comment,
+            ],
         ):
             event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=7, head_sha="abc123", installation_id="55")
             result = await env.client.execute_workflow(
                 PRReviewWorkflow.run,
                 event,
-                id="test-workflow-4-1",
-                task_queue="test-queue-4-1",
+                id="test-workflow-6-1",
+                task_queue="test-queue-6-1",
             )
 
         assert result == 42
-        call_types = [c[0] for c in calls]
-        assert "check_staleness" in call_types
-        assert call_types.index("check_staleness") > call_types.index("aggregate")
-        assert call_types.index("post_comment") > call_types.index("check_staleness")
+        assert ("check_failure_injection",) in calls
         assert calls[-1] == ("set_status", "complete")
+
+
+async def test_workflow_compensates_when_failure_injected():
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        calls = []
+
+        @activity.defn(name="set_review_status_activity")
+        async def fake_set_status(input: SetStatusInput) -> None:
+            calls.append(("set_status", input.status))
+
+        @activity.defn(name="fetch_diff_activity")
+        async def fake_fetch_diff(input: FetchDiffInput) -> str:
+            calls.append(("fetch_diff",))
+            return "diff-text"
+
+        @activity.defn(name="check_staleness_activity")
+        async def fake_check_staleness(input: StalenessCheckInput) -> bool:
+            calls.append(("check_staleness", input.head_sha))
+            return False
+
+        @activity.defn(name="post_comment_activity")
+        async def fake_post_comment(input: PostCommentInput) -> int:
+            calls.append(("post_comment", input.body))
+            return 42
+
+        @activity.defn(name="check_demo_failure_injection_activity")
+        async def fake_check_failure_injection() -> bool:
+            calls.append(("check_failure_injection",))
+            return True
+
+        @activity.defn(name="delete_comment_activity")
+        async def fake_delete_comment(input: DeleteCommentInput) -> None:
+            calls.append(("delete_comment", input.comment_id))
+
+        async with Worker(
+            env.client,
+            task_queue="test-queue-6-2",
+            workflows=[PRReviewWorkflow],
+            activities=[
+                fake_set_status,
+                fake_fetch_diff,
+                *_agent_fakes(calls),
+                fake_check_staleness,
+                fake_post_comment,
+                fake_check_failure_injection,
+                fake_delete_comment,
+            ],
+        ):
+            event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=7, head_sha="abc123", installation_id="55")
+
+            with pytest.raises(WorkflowFailureError):
+                await env.client.execute_workflow(
+                    PRReviewWorkflow.run,
+                    event,
+                    id="test-workflow-6-2",
+                    task_queue="test-queue-6-2",
+                )
+
+        assert ("delete_comment", 42) in calls
+        assert calls[-1] == ("set_status", "failed")
 
 
 async def test_workflow_discards_stale_run_without_posting():
@@ -108,7 +183,7 @@ async def test_workflow_discards_stale_run_without_posting():
 
         async with Worker(
             env.client,
-            task_queue="test-queue-4-2",
+            task_queue="test-queue-6-3",
             workflows=[PRReviewWorkflow],
             activities=[fake_set_status, fake_fetch_diff, *_agent_fakes(calls), fake_check_staleness, unused_post_comment],
         ):
@@ -116,8 +191,8 @@ async def test_workflow_discards_stale_run_without_posting():
             result = await env.client.execute_workflow(
                 PRReviewWorkflow.run,
                 event,
-                id="test-workflow-4-2",
-                task_queue="test-queue-4-2",
+                id="test-workflow-6-3",
+                task_queue="test-queue-6-3",
             )
 
         assert result == -1
@@ -162,7 +237,7 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
 
         async with Worker(
             env.client,
-            task_queue="test-queue-4-3",
+            task_queue="test-queue-6-4",
             workflows=[PRReviewWorkflow],
             activities=[
                 fake_set_status,
@@ -181,8 +256,8 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
                 await env.client.execute_workflow(
                     PRReviewWorkflow.run,
                     event,
-                    id="test-workflow-4-3",
-                    task_queue="test-queue-4-3",
+                    id="test-workflow-6-4",
+                    task_queue="test-queue-6-4",
                 )
 
         assert calls == ["running", "failed"]

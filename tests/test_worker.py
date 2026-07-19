@@ -43,5 +43,7 @@ async def test_main_wires_db_client_and_worker_together(monkeypatch):
         worker.test_coverage_review_activity,
         worker.aggregate_activity,
         worker.check_staleness_activity,
+        worker.check_demo_failure_injection_activity,
+        worker.delete_comment_activity,
     ]
     assert calls[3] == "worker_run"

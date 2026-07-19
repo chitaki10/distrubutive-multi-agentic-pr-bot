@@ -4,10 +4,11 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, ApplicationError
 
 from prbot.activity_types import (
     AggregateInput,
+    DeleteCommentInput,
     FetchDiffInput,
     PostCommentInput,
     ReviewInput,
@@ -119,6 +120,29 @@ class PRReviewWorkflow:
         except ActivityError:
             await set_status("failed")
             raise
+
+        should_fail = await workflow.execute_activity(
+            "check_demo_failure_injection_activity",
+            start_to_close_timeout=timedelta(seconds=10),
+            retry_policy=retry_policy,
+        )
+
+        if should_fail:
+            await workflow.execute_activity(
+                "delete_comment_activity",
+                DeleteCommentInput(
+                    installation_id=event.installation_id,
+                    owner=event.owner,
+                    repo=event.repo,
+                    comment_id=comment_id,
+                ),
+                start_to_close_timeout=timedelta(seconds=15),
+                retry_policy=retry_policy,
+            )
+            await set_status("failed")
+            raise ApplicationError(
+                "Demo failure injection triggered after posting comment", non_retryable=True
+            )
 
         await set_status("complete")
         return comment_id

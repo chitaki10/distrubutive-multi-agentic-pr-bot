@@ -5,7 +5,9 @@ from temporalio.worker import Worker
 
 from prbot.activities import (
     aggregate_activity,
+    check_demo_failure_injection_activity,
     check_staleness_activity,
+    delete_comment_activity,
     fetch_diff_activity,
     post_comment_activity,
     review_activity,
@@ -37,6 +39,8 @@ async def main() -> None:
             test_coverage_review_activity,
             aggregate_activity,
             check_staleness_activity,
+            check_demo_failure_injection_activity,
+            delete_comment_activity,
         ],
     )
     await worker.run()
