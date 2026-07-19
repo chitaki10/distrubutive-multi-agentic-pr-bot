@@ -1,0 +1,114 @@
+# tests/test_activities.py
+from prbot import activities
+
+
+async def test_fetch_diff_activity_calls_apis_in_order(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("dummy-key")
+
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    calls = []
+
+    def fake_generate_app_jwt(app_id, key):
+        calls.append(("jwt", app_id))
+        return "fake.jwt"
+
+    async def fake_get_installation_token(app_jwt, installation_id):
+        calls.append(("token", app_jwt, installation_id))
+        return "ghs_token"
+
+    async def fake_fetch_pr_diff(token, owner, repo, pr_number):
+        calls.append(("diff", token, owner, repo, pr_number))
+        return "diff-content"
+
+    monkeypatch.setattr(activities.github_client, "generate_app_jwt", fake_generate_app_jwt)
+    monkeypatch.setattr(activities.github_client, "get_installation_token", fake_get_installation_token)
+    monkeypatch.setattr(activities.github_client, "fetch_pr_diff", fake_fetch_pr_diff)
+
+    result = await activities.fetch_diff_activity(
+        activities.FetchDiffInput(installation_id="55", owner="chitaki10", repo="demo", pr_number=7)
+    )
+
+    assert result == "diff-content"
+    assert calls == [
+        ("jwt", "1"),
+        ("token", "fake.jwt", "55"),
+        ("diff", "ghs_token", "chitaki10", "demo", 7),
+    ]
+
+
+async def test_review_activity_calls_review_diff(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    async def fake_review_diff(diff_text, base_url, model):
+        assert diff_text == "diff-content"
+        assert base_url == "http://localhost:11434"
+        assert model == "qwen2.5-coder:3b"
+        return "review-body"
+
+    monkeypatch.setattr(activities.llm_client, "review_diff", fake_review_diff)
+
+    result = await activities.review_activity(activities.ReviewInput(diff_text="diff-content"))
+
+    assert result == "review-body"
+
+
+async def test_post_comment_activity_calls_apis_in_order(monkeypatch, tmp_path):
+    key_file = tmp_path / "key.pem"
+    key_file.write_text("dummy-key")
+
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key_file))
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    calls = []
+
+    def fake_generate_app_jwt(app_id, key):
+        calls.append(("jwt", app_id))
+        return "fake.jwt"
+
+    async def fake_get_installation_token(app_jwt, installation_id):
+        calls.append(("token", app_jwt, installation_id))
+        return "ghs_token"
+
+    async def fake_post_pr_comment(token, owner, repo, pr_number, body):
+        calls.append(("comment", token, owner, repo, pr_number, body))
+        return 99
+
+    monkeypatch.setattr(activities.github_client, "generate_app_jwt", fake_generate_app_jwt)
+    monkeypatch.setattr(activities.github_client, "get_installation_token", fake_get_installation_token)
+    monkeypatch.setattr(activities.github_client, "post_pr_comment", fake_post_pr_comment)
+
+    result = await activities.post_comment_activity(
+        activities.PostCommentInput(installation_id="55", owner="chitaki10", repo="demo", pr_number=7, body="nice PR")
+    )
+
+    assert result == 99
+    assert calls == [
+        ("jwt", "1"),
+        ("token", "fake.jwt", "55"),
+        ("comment", "ghs_token", "chitaki10", "demo", 7, "nice PR"),
+    ]
+
+
+async def test_set_review_status_activity_calls_db(monkeypatch):
+    calls = []
+
+    async def fake_set_review_status(repo, pr_number, head_sha, status):
+        calls.append((repo, pr_number, head_sha, status))
+
+    monkeypatch.setattr(activities.db, "set_review_status", fake_set_review_status)
+
+    await activities.set_review_status_activity(
+        activities.SetStatusInput(repo="demo", pr_number=7, head_sha="abc123", status="running")
+    )
+
+    assert calls == [("demo", 7, "abc123", "running")]
