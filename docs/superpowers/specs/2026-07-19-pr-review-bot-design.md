@@ -22,6 +22,9 @@ GitHub PR (opened/synchronize)
 FastAPI webhook-service
    │  verify signature → extract {repo, pr_number, head_sha, installation_id}
    │  start/signal Temporal workflow, workflow_id = f"{repo}#{pr_number}"
+   │  (Stage 2 uses f"{owner}/{repo}#{pr_number}@{head_sha}" instead — see
+   │  Stage 2 implementation notes; the collision-free {repo}#{pr_number}
+   │  scheme with explicit supersede handling arrives in Stage 4)
    │  return 200 immediately — no inline work
    ▼
 Temporal Server (local dev: `temporal server start-dev`, built-in Web UI)
@@ -131,3 +134,36 @@ Vertical slice first, not infra-first: get GitHub App + webhook + one real LLM c
 | **7 — Polish** | README, architecture diagram, demo script/Makefile | Repeatable, scripted demo run |
 
 Each stage after 0 ends in something demoable; stages are additive and don't require rework of earlier stages' code, only wrapping/extending it.
+
+## Stage 2 implementation notes
+
+Decisions made when brainstorming Stage 2 in detail (the table row above only sketched the goal).
+
+**Process topology:** two separate local processes, matching the Components table above — `prbot.app:app` (FastAPI, unchanged role except the webhook now starts a workflow instead of running the review inline) and a new `prbot.worker` entrypoint (long-running Temporal Worker hosting the workflow + activities). New files: `src/prbot/workflows.py` (`PRReviewWorkflow`), `src/prbot/activities.py` (`fetch_diff_activity`, `review_activity`, `post_comment_activity`, `set_review_status_activity`), `src/prbot/worker.py`, `src/prbot/db.py` (`asyncpg`-based, `init_db`/`set_review_status`, idempotent `CREATE TABLE IF NOT EXISTS` — no migration framework, YAGNI at this scope). New deps: `temporalio`, `asyncpg`.
+
+**Webhook behavior:** fast-ack — webhook calls the Temporal client's `start_workflow` (non-blocking, returns once the workflow is accepted, not once it completes) and responds immediately. Fixes the GitHub ~10s webhook-timeout cosmetic issue noted in Stage 1's final review.
+
+**Workflow ID:** `f"{owner}/{repo}#{pr_number}@{head_sha}"` — includes head_sha so each push gets its own workflow run, sidestepping Temporal's "already running" collision. Stage 4 introduces the collision-free `{repo}#{pr_number}` scheme with explicit cancel-superseded-run handling; Stage 2 doesn't need that complexity yet.
+
+**Activity granularity:** 3 activities for the review pipeline (`fetch_diff_activity`, `review_activity`, `post_comment_activity`), each independently retried by Temporal's default policy. This is what makes the durability demo real — killing the worker mid-LLM-call and restarting resumes from that activity, not from the top. Activities call `github_client`/`llm_client` functions directly (not through Stage 1's `review.py:run_stage1_review`, which bundles all four steps into one call) — `review.py` and its tests are left untouched.
+
+**Secrets stay out of workflow history:** the workflow only carries plain identifiers (owner, repo, pr_number, installation_id, head_sha) as activity arguments. Each activity reads `Settings` (App ID, private key path) itself at execution time rather than the workflow passing key material through Temporal's persisted event history.
+
+**DB schema for this stage** (subset of the Data model above — `agent_results`/`posted_comments` arrive in Stage 3/6):
+```sql
+CREATE TABLE IF NOT EXISTS pr_reviews (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  repo text NOT NULL,
+  pr_number int NOT NULL,
+  head_sha text NOT NULL,
+  status text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(repo, pr_number, head_sha)
+);
+```
+`set_review_status_activity` upserts on `(repo, pr_number, head_sha)`, called at workflow start (`running`), and at the end (`complete` or `failed` — the workflow catches an exhausted-retries `ActivityError`, records `failed`, then re-raises so Temporal's own history also shows the failure).
+
+**Testing:** activities are plain async functions, testable directly without the Temporal runtime (same respx/monkeypatch style as Stage 1). The workflow is tested with `temporalio.testing.WorkflowEnvironment` (time-skipping test server) with mocked activities, covering call order and the retry-to-failed path. `db.py` is tested against the real docker-compose Postgres, using a unique `(repo, pr_number, head_sha)` per test to avoid collisions — no separate test-DB teardown machinery at this scope.
+
+**Demo checkpoint:** open a PR, kill the worker process while the LLM call is in flight, restart the worker, confirm the comment still posts and Temporal's Web UI (`localhost:8233`) shows the workflow resumed from history rather than restarting from step 1.
