@@ -22,12 +22,6 @@ async def test_main_wires_db_client_and_worker_together(monkeypatch):
         async def run(self):
             calls.append("worker_run")
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
     monkeypatch.setattr(worker, "init_db", fake_init_db)
     monkeypatch.setattr(worker.Client, "connect", staticmethod(fake_connect))
     monkeypatch.setattr(worker, "Worker", FakeWorker)
@@ -38,4 +32,11 @@ async def test_main_wires_db_client_and_worker_together(monkeypatch):
     assert calls[1] == ("connect", "localhost:7233")
     assert calls[2][0] == "worker_init"
     assert calls[2][1] == worker.TASK_QUEUE
+    assert calls[2][2] == [worker.PRReviewWorkflow]
+    assert calls[2][3] == [
+        worker.fetch_diff_activity,
+        worker.review_activity,
+        worker.post_comment_activity,
+        worker.set_review_status_activity,
+    ]
     assert calls[3] == "worker_run"
