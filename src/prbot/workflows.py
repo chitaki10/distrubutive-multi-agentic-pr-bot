@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -5,7 +6,13 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
-from prbot.activity_types import FetchDiffInput, PostCommentInput, ReviewInput, SetStatusInput
+from prbot.activity_types import (
+    AggregateInput,
+    FetchDiffInput,
+    PostCommentInput,
+    ReviewInput,
+    SetStatusInput,
+)
 
 
 @dataclass
@@ -46,10 +53,36 @@ class PRReviewWorkflow:
                 retry_policy=retry_policy,
             )
 
+            review_input = ReviewInput(diff_text=diff)
+            security_result, style_result, test_coverage_result = await asyncio.gather(
+                workflow.execute_activity(
+                    "security_review_activity",
+                    review_input,
+                    start_to_close_timeout=timedelta(seconds=180),
+                    retry_policy=retry_policy,
+                ),
+                workflow.execute_activity(
+                    "style_review_activity",
+                    review_input,
+                    start_to_close_timeout=timedelta(seconds=180),
+                    retry_policy=retry_policy,
+                ),
+                workflow.execute_activity(
+                    "test_coverage_review_activity",
+                    review_input,
+                    start_to_close_timeout=timedelta(seconds=180),
+                    retry_policy=retry_policy,
+                ),
+            )
+
             review_body = await workflow.execute_activity(
-                "review_activity",
-                ReviewInput(diff_text=diff),
-                start_to_close_timeout=timedelta(seconds=180),
+                "aggregate_activity",
+                AggregateInput(
+                    security_result=security_result,
+                    style_result=style_result,
+                    test_coverage_result=test_coverage_result,
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_policy,
             )
 
