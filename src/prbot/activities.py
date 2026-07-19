@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pybreaker
 from temporalio import activity
 
 from prbot import db, github_client, llm_client
@@ -57,28 +58,63 @@ TEST_COVERAGE_SYSTEM_PROMPT = (
 )
 
 
-@activity.defn
-async def security_review_activity(input: ReviewInput) -> str:
-    settings = get_settings()
-    return await llm_client.review_diff_with_prompt(
-        input.diff_text, settings.ollama_base_url, settings.ollama_model, SECURITY_SYSTEM_PROMPT
-    )
+security_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+style_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+test_coverage_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 
 @activity.defn
-async def style_review_activity(input: ReviewInput) -> str:
+async def security_review_activity(input: ReviewInput) -> str | None:
     settings = get_settings()
-    return await llm_client.review_diff_with_prompt(
-        input.diff_text, settings.ollama_base_url, settings.ollama_model, STYLE_SYSTEM_PROMPT
-    )
+
+    async def _review_call():
+        return await llm_client.review_diff_with_prompt(
+            input.diff_text,
+            settings.ollama_base_url,
+            settings.ollama_model,
+            SECURITY_SYSTEM_PROMPT,
+        )
+
+    try:
+        return await security_breaker.call_async(_review_call)
+    except pybreaker.CircuitBreakerError:
+        return None
 
 
 @activity.defn
-async def test_coverage_review_activity(input: ReviewInput) -> str:
+async def style_review_activity(input: ReviewInput) -> str | None:
     settings = get_settings()
-    return await llm_client.review_diff_with_prompt(
-        input.diff_text, settings.ollama_base_url, settings.ollama_model, TEST_COVERAGE_SYSTEM_PROMPT
-    )
+
+    async def _review_call():
+        return await llm_client.review_diff_with_prompt(
+            input.diff_text,
+            settings.ollama_base_url,
+            settings.ollama_model,
+            STYLE_SYSTEM_PROMPT,
+        )
+
+    try:
+        return await style_breaker.call_async(_review_call)
+    except pybreaker.CircuitBreakerError:
+        return None
+
+
+@activity.defn
+async def test_coverage_review_activity(input: ReviewInput) -> str | None:
+    settings = get_settings()
+
+    async def _review_call():
+        return await llm_client.review_diff_with_prompt(
+            input.diff_text,
+            settings.ollama_base_url,
+            settings.ollama_model,
+            TEST_COVERAGE_SYSTEM_PROMPT,
+        )
+
+    try:
+        return await test_coverage_breaker.call_async(_review_call)
+    except pybreaker.CircuitBreakerError:
+        return None
 
 
 @activity.defn
