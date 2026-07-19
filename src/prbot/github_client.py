@@ -27,3 +27,36 @@ async def get_installation_token(
         response = await client.post(url, headers=headers)
         response.raise_for_status()
         return response.json()["token"]
+
+
+async def fetch_pr_diff(
+    token: str, owner: str, repo: str, pr_number: int, base_url: str = "https://api.github.com"
+) -> str:
+    url = f"{base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.v3.diff",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        return response.text
+
+
+async def post_pr_comment(
+    token: str,
+    owner: str,
+    repo: str,
+    pr_number: int,
+    body: str,
+    base_url: str = "https://api.github.com",
+) -> int:
+    url = f"{base_url}/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, headers=headers, json={"body": body})
+        response.raise_for_status()
+        return response.json()["id"]
