@@ -112,3 +112,85 @@ async def test_set_review_status_activity_calls_db(monkeypatch):
     )
 
     assert calls == [("demo", 7, "abc123", "running")]
+
+
+async def test_security_review_activity_uses_security_prompt(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
+        assert diff_text == "diff-content"
+        assert system_prompt == activities.SECURITY_SYSTEM_PROMPT
+        return "security findings"
+
+    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
+
+    result = await activities.security_review_activity(activities.ReviewInput(diff_text="diff-content"))
+
+    assert result == "security findings"
+
+
+async def test_style_review_activity_uses_style_prompt(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
+        assert system_prompt == activities.STYLE_SYSTEM_PROMPT
+        return "style findings"
+
+    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
+
+    result = await activities.style_review_activity(activities.ReviewInput(diff_text="diff-content"))
+
+    assert result == "style findings"
+
+
+async def test_test_coverage_review_activity_uses_test_coverage_prompt(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
+    activities.get_settings.cache_clear()
+
+    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
+        assert system_prompt == activities.TEST_COVERAGE_SYSTEM_PROMPT
+        return "test coverage findings"
+
+    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
+
+    result = await activities.test_coverage_review_activity(activities.ReviewInput(diff_text="diff-content"))
+
+    assert result == "test coverage findings"
+
+
+async def test_aggregate_activity_merges_all_three_sections():
+    result = await activities.aggregate_activity(
+        activities.AggregateInput(
+            security_result="no issues found",
+            style_result="looks clean",
+            test_coverage_result="missing a test for the new branch",
+        )
+    )
+
+    assert "### Security" in result
+    assert "no issues found" in result
+    assert "### Style" in result
+    assert "looks clean" in result
+    assert "### Test Coverage" in result
+    assert "missing a test for the new branch" in result
+
+
+async def test_aggregate_activity_notes_skipped_agent():
+    result = await activities.aggregate_activity(
+        activities.AggregateInput(
+            security_result=None,
+            style_result="looks clean",
+            test_coverage_result="all covered",
+        )
+    )
+
+    assert "### Security" in result
+    assert "skipped" in result.lower()

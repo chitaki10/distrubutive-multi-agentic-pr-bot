@@ -29,3 +29,10 @@ class SetStatusInput:
     pr_number: int
     head_sha: str
     status: str
+
+
+@dataclass
+class AggregateInput:
+    security_result: str | None
+    style_result: str | None
+    test_coverage_result: str | None
