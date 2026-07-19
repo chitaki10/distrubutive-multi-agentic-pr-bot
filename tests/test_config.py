@@ -15,3 +15,18 @@ def test_settings_loads_from_env(monkeypatch):
     assert settings.github_webhook_secret == "s3cr3t"
     assert settings.ollama_base_url == "http://localhost:11434"
     assert settings.ollama_model == "qwen2.5-coder:3b"
+
+
+def test_get_settings_is_cached_and_includes_postgres_dsn(monkeypatch):
+    monkeypatch.setenv("GITHUB_APP_ID", "12345")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "/tmp/key.pem")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "s3cr3t")
+
+    from prbot.config import get_settings
+
+    get_settings.cache_clear()
+    first = get_settings()
+    second = get_settings()
+
+    assert first is second
+    assert first.postgres_dsn == "postgresql://prbot:prbot@localhost:5432/prbot"
