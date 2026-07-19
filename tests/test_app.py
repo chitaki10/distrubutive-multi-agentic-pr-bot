@@ -12,6 +12,20 @@ def _sign(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
+class FakeHandle:
+    def __init__(self, id: str):
+        self.id = id
+
+
+class FakeTemporalClient:
+    def __init__(self):
+        self.start_workflow_calls = []
+
+    async def start_workflow(self, workflow_run, event, *, id, task_queue):
+        self.start_workflow_calls.append((workflow_run, event, id, task_queue))
+        return FakeHandle(id)
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     key_file = tmp_path / "key.pem"
@@ -23,17 +37,19 @@ def client(monkeypatch, tmp_path):
 
     app_module.get_settings.cache_clear()
 
-    monkeypatch.setattr(app_module, "generate_app_jwt", lambda app_id, key: "fake.jwt")
+    fake_client = FakeTemporalClient()
 
-    async def fake_run_stage1_review(event, settings, app_jwt):
-        return 42
+    async def fake_get_temporal_client():
+        return fake_client
 
-    monkeypatch.setattr(app_module, "run_stage1_review", fake_run_stage1_review)
+    monkeypatch.setattr(app_module, "get_temporal_client", fake_get_temporal_client)
 
-    return TestClient(app_module.app)
+    test_client = TestClient(app_module.app)
+    test_client.fake_temporal = fake_client
+    return test_client
 
 
-def test_webhook_posts_review_on_valid_signature(client):
+def test_webhook_starts_workflow_on_valid_signature(client):
     payload = {
         "action": "opened",
         "pull_request": {"number": 7, "head": {"sha": "abc123"}},
@@ -50,7 +66,8 @@ def test_webhook_posts_review_on_valid_signature(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "posted", "comment_id": 42}
+    assert response.json() == {"status": "started", "workflow_id": "chitaki10/demo#7@abc123"}
+    assert len(client.fake_temporal.start_workflow_calls) == 1
 
 
 def test_webhook_rejects_invalid_signature(client):

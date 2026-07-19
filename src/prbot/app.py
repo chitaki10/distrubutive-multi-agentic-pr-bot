@@ -1,19 +1,22 @@
-from functools import lru_cache
-from pathlib import Path
-
 from fastapi import FastAPI, HTTPException, Request
+from temporalio.client import Client
 
-from prbot.config import Settings
+from prbot.config import get_settings
 from prbot.events import parse_pull_request_event, verify_signature
-from prbot.github_client import generate_app_jwt
-from prbot.review import run_stage1_review
+from prbot.workflows import PRReviewWorkflow, ReviewEvent
+
+TASK_QUEUE = "pr-review-task-queue"
 
 app = FastAPI()
 
+_temporal_client: Client | None = None
 
-@lru_cache
-def get_settings() -> Settings:
-    return Settings()
+
+async def get_temporal_client() -> Client:
+    global _temporal_client
+    if _temporal_client is None:
+        _temporal_client = await Client.connect("localhost:7233")
+    return _temporal_client
 
 
 @app.post("/webhook")
@@ -30,8 +33,19 @@ async def handle_webhook(request: Request):
     if event is None:
         return {"status": "ignored"}
 
-    private_key = Path(settings.github_private_key_path).read_text()
-    app_jwt = generate_app_jwt(settings.github_app_id, private_key)
-
-    comment_id = await run_stage1_review(event, settings, app_jwt)
-    return {"status": "posted", "comment_id": comment_id}
+    client = await get_temporal_client()
+    review_event = ReviewEvent(
+        owner=event.owner,
+        repo=event.repo,
+        pr_number=event.pr_number,
+        head_sha=event.head_sha,
+        installation_id=event.installation_id,
+    )
+    workflow_id = f"{event.owner}/{event.repo}#{event.pr_number}@{event.head_sha}"
+    handle = await client.start_workflow(
+        PRReviewWorkflow.run,
+        review_event,
+        id=workflow_id,
+        task_queue=TASK_QUEUE,
+    )
+    return {"status": "started", "workflow_id": handle.id}
