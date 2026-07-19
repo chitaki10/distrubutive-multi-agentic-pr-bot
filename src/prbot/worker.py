@@ -4,10 +4,14 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from prbot.activities import (
+    aggregate_activity,
     fetch_diff_activity,
     post_comment_activity,
     review_activity,
+    security_review_activity,
     set_review_status_activity,
+    style_review_activity,
+    test_coverage_review_activity,
 )
 from prbot.db import init_db
 from prbot.workflows import PRReviewWorkflow
@@ -27,6 +31,10 @@ async def main() -> None:
             review_activity,
             post_comment_activity,
             set_review_status_activity,
+            security_review_activity,
+            style_review_activity,
+            test_coverage_review_activity,
+            aggregate_activity,
         ],
     )
     await worker.run()
