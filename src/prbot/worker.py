@@ -1,0 +1,36 @@
+import asyncio
+
+from temporalio.client import Client
+from temporalio.worker import Worker
+
+from prbot.activities import (
+    fetch_diff_activity,
+    post_comment_activity,
+    review_activity,
+    set_review_status_activity,
+)
+from prbot.db import init_db
+from prbot.workflows import PRReviewWorkflow
+
+TASK_QUEUE = "pr-review-task-queue"
+
+
+async def main() -> None:
+    await init_db()
+    client = await Client.connect("localhost:7233")
+    worker = Worker(
+        client,
+        task_queue=TASK_QUEUE,
+        workflows=[PRReviewWorkflow],
+        activities=[
+            fetch_diff_activity,
+            review_activity,
+            post_comment_activity,
+            set_review_status_activity,
+        ],
+    )
+    await worker.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
