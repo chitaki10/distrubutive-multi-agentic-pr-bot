@@ -29,4 +29,4 @@ def test_get_settings_is_cached_and_includes_postgres_dsn(monkeypatch):
     second = get_settings()
 
     assert first is second
-    assert first.postgres_dsn == "postgresql://prbot:prbot@localhost:5432/prbot"
+    assert first.postgres_dsn == "postgresql://prbot:prbot@localhost:5434/prbot"

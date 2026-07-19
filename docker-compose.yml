@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: prbot
       POSTGRES_DB: prbot
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - prbot_pgdata:/var/lib/postgresql/data
 

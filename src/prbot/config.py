@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     github_webhook_secret: str
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5-coder:3b"
-    postgres_dsn: str = "postgresql://prbot:prbot@localhost:5432/prbot"
+    postgres_dsn: str = "postgresql://prbot:prbot@localhost:5434/prbot"
 
 
 @lru_cache
