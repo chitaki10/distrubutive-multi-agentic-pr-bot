@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from prbot import app as app_module
+from prbot.workflows import PRReviewWorkflow, ReviewEvent
 
 
 def _sign(body: bytes, secret: str) -> str:
@@ -68,6 +69,19 @@ def test_webhook_starts_workflow_on_valid_signature(client):
     assert response.status_code == 200
     assert response.json() == {"status": "started", "workflow_id": "chitaki10/demo#7@abc123"}
     assert len(client.fake_temporal.start_workflow_calls) == 1
+
+    # Verify the exact arguments passed to start_workflow
+    workflow_run, event, workflow_id, task_queue = client.fake_temporal.start_workflow_calls[0]
+    assert workflow_run is PRReviewWorkflow.run
+    assert event == ReviewEvent(
+        owner="chitaki10",
+        repo="demo",
+        pr_number=7,
+        head_sha="abc123",
+        installation_id="55",
+    )
+    assert workflow_id == "chitaki10/demo#7@abc123"
+    assert task_queue == app_module.TASK_QUEUE
 
 
 def test_webhook_rejects_invalid_signature(client):
