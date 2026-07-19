@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: prbot
+      POSTGRES_PASSWORD: prbot
+      POSTGRES_DB: prbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - prbot_pgdata:/var/lib/postgresql/data
+
+volumes:
+  prbot_pgdata:
