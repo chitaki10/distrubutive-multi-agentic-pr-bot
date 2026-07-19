@@ -10,11 +10,36 @@ from prbot.activity_types import (
     PostCommentInput,
     ReviewInput,
     SetStatusInput,
+    StalenessCheckInput,
 )
 from prbot.workflows import PRReviewWorkflow, ReviewEvent
 
 
-async def test_workflow_runs_agents_concurrently_and_completes():
+def _agent_fakes(calls):
+    @activity.defn(name="security_review_activity")
+    async def fake_security(input: ReviewInput) -> str:
+        calls.append(("security", input.diff_text))
+        return "security-result"
+
+    @activity.defn(name="style_review_activity")
+    async def fake_style(input: ReviewInput) -> str:
+        calls.append(("style", input.diff_text))
+        return "style-result"
+
+    @activity.defn(name="test_coverage_review_activity")
+    async def fake_test_coverage(input: ReviewInput) -> str:
+        calls.append(("test_coverage", input.diff_text))
+        return "test-coverage-result"
+
+    @activity.defn(name="aggregate_activity")
+    async def fake_aggregate(input: AggregateInput) -> str:
+        calls.append(("aggregate", input.security_result, input.style_result, input.test_coverage_result))
+        return "aggregated-body"
+
+    return [fake_security, fake_style, fake_test_coverage, fake_aggregate]
+
+
+async def test_workflow_posts_when_not_stale():
     async with await WorkflowEnvironment.start_time_skipping() as env:
         calls = []
 
@@ -27,25 +52,10 @@ async def test_workflow_runs_agents_concurrently_and_completes():
             calls.append(("fetch_diff",))
             return "diff-text"
 
-        @activity.defn(name="security_review_activity")
-        async def fake_security(input: ReviewInput) -> str:
-            calls.append(("security", input.diff_text))
-            return "security-result"
-
-        @activity.defn(name="style_review_activity")
-        async def fake_style(input: ReviewInput) -> str:
-            calls.append(("style", input.diff_text))
-            return "style-result"
-
-        @activity.defn(name="test_coverage_review_activity")
-        async def fake_test_coverage(input: ReviewInput) -> str:
-            calls.append(("test_coverage", input.diff_text))
-            return "test-coverage-result"
-
-        @activity.defn(name="aggregate_activity")
-        async def fake_aggregate(input: AggregateInput) -> str:
-            calls.append(("aggregate", input.security_result, input.style_result, input.test_coverage_result))
-            return "aggregated-body"
+        @activity.defn(name="check_staleness_activity")
+        async def fake_check_staleness(input: StalenessCheckInput) -> bool:
+            calls.append(("check_staleness", input.head_sha))
+            return False
 
         @activity.defn(name="post_comment_activity")
         async def fake_post_comment(input: PostCommentInput) -> int:
@@ -54,45 +64,64 @@ async def test_workflow_runs_agents_concurrently_and_completes():
 
         async with Worker(
             env.client,
-            task_queue="test-queue-3-1",
+            task_queue="test-queue-4-1",
             workflows=[PRReviewWorkflow],
-            activities=[
-                fake_set_status,
-                fake_fetch_diff,
-                fake_security,
-                fake_style,
-                fake_test_coverage,
-                fake_aggregate,
-                fake_post_comment,
-            ],
+            activities=[fake_set_status, fake_fetch_diff, *_agent_fakes(calls), fake_check_staleness, fake_post_comment],
         ):
             event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=7, head_sha="abc123", installation_id="55")
             result = await env.client.execute_workflow(
                 PRReviewWorkflow.run,
                 event,
-                id="test-workflow-3-1",
-                task_queue="test-queue-3-1",
+                id="test-workflow-4-1",
+                task_queue="test-queue-4-1",
             )
 
         assert result == 42
-
         call_types = [c[0] for c in calls]
-        assert call_types[0] == "set_status"
-        assert calls[0][1] == "running"
-        assert call_types[1] == "fetch_diff"
-        # the three agent calls happen concurrently; assert all three occurred
-        # between fetch_diff and aggregate, in any relative order
-        agent_calls = {c[0] for c in calls if c[0] in ("security", "style", "test_coverage")}
-        assert agent_calls == {"security", "style", "test_coverage"}
-        for c in calls:
-            if c[0] in ("security", "style", "test_coverage"):
-                assert c[1] == "diff-text"
-        aggregate_call = next(c for c in calls if c[0] == "aggregate")
-        assert aggregate_call == ("aggregate", "security-result", "style-result", "test-coverage-result")
-        assert call_types[-2] == "post_comment"
-        assert calls[-2][1] == "aggregated-body"
-        assert call_types[-1] == "set_status"
-        assert calls[-1][1] == "complete"
+        assert "check_staleness" in call_types
+        assert call_types.index("check_staleness") > call_types.index("aggregate")
+        assert call_types.index("post_comment") > call_types.index("check_staleness")
+        assert calls[-1] == ("set_status", "complete")
+
+
+async def test_workflow_discards_stale_run_without_posting():
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        calls = []
+
+        @activity.defn(name="set_review_status_activity")
+        async def fake_set_status(input: SetStatusInput) -> None:
+            calls.append(("set_status", input.status))
+
+        @activity.defn(name="fetch_diff_activity")
+        async def fake_fetch_diff(input: FetchDiffInput) -> str:
+            calls.append(("fetch_diff",))
+            return "diff-text"
+
+        @activity.defn(name="check_staleness_activity")
+        async def fake_check_staleness(input: StalenessCheckInput) -> bool:
+            calls.append(("check_staleness", input.head_sha))
+            return True
+
+        @activity.defn(name="post_comment_activity")
+        async def unused_post_comment(input: PostCommentInput) -> int:
+            raise AssertionError("should not be called when stale")
+
+        async with Worker(
+            env.client,
+            task_queue="test-queue-4-2",
+            workflows=[PRReviewWorkflow],
+            activities=[fake_set_status, fake_fetch_diff, *_agent_fakes(calls), fake_check_staleness, unused_post_comment],
+        ):
+            event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=7, head_sha="abc123", installation_id="55")
+            result = await env.client.execute_workflow(
+                PRReviewWorkflow.run,
+                event,
+                id="test-workflow-4-2",
+                task_queue="test-queue-4-2",
+            )
+
+        assert result == -1
+        assert calls[-1] == ("set_status", "stale")
 
 
 async def test_workflow_marks_failed_when_activity_exhausts_retries():
@@ -123,13 +152,17 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
         async def unused_aggregate(input: AggregateInput) -> str:
             raise AssertionError("should not be called")
 
+        @activity.defn(name="check_staleness_activity")
+        async def unused_check_staleness(input: StalenessCheckInput) -> bool:
+            raise AssertionError("should not be called")
+
         @activity.defn(name="post_comment_activity")
         async def unused_post_comment(input: PostCommentInput) -> int:
             raise AssertionError("should not be called")
 
         async with Worker(
             env.client,
-            task_queue="test-queue-3-2",
+            task_queue="test-queue-4-3",
             workflows=[PRReviewWorkflow],
             activities=[
                 fake_set_status,
@@ -138,6 +171,7 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
                 unused_style,
                 unused_test_coverage,
                 unused_aggregate,
+                unused_check_staleness,
                 unused_post_comment,
             ],
         ):
@@ -147,8 +181,8 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
                 await env.client.execute_workflow(
                     PRReviewWorkflow.run,
                     event,
-                    id="test-workflow-3-2",
-                    task_queue="test-queue-3-2",
+                    id="test-workflow-4-3",
+                    task_queue="test-queue-4-3",
                 )
 
         assert calls == ["running", "failed"]

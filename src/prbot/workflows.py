@@ -12,6 +12,7 @@ from prbot.activity_types import (
     PostCommentInput,
     ReviewInput,
     SetStatusInput,
+    StalenessCheckInput,
 )
 
 
@@ -85,6 +86,23 @@ class PRReviewWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_policy,
             )
+
+            is_stale = await workflow.execute_activity(
+                "check_staleness_activity",
+                StalenessCheckInput(
+                    installation_id=event.installation_id,
+                    owner=event.owner,
+                    repo=event.repo,
+                    pr_number=event.pr_number,
+                    head_sha=event.head_sha,
+                ),
+                start_to_close_timeout=timedelta(seconds=15),
+                retry_policy=retry_policy,
+            )
+
+            if is_stale:
+                await set_status("stale")
+                return -1
 
             comment_id = await workflow.execute_activity(
                 "post_comment_activity",
