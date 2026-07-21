@@ -9,11 +9,12 @@ from prbot.activity_types import (
     DeleteCommentInput,
     FetchDiffInput,
     PostCommentInput,
+    RecordStepInput,
     ReviewInput,
     SetStatusInput,
     StalenessCheckInput,
 )
-from prbot.workflows import PRReviewWorkflow, ReviewEvent
+from prbot.orchestration.workflows import PRReviewWorkflow, ReviewEvent
 
 
 def _agent_fakes(calls):
@@ -37,7 +38,14 @@ def _agent_fakes(calls):
         calls.append(("aggregate", input.security_result, input.style_result, input.test_coverage_result))
         return "aggregated-body"
 
-    return [fake_security, fake_style, fake_test_coverage, fake_aggregate]
+    @activity.defn(name="record_state_version_activity")
+    async def fake_record_step(input: RecordStepInput) -> str | None:
+        calls.append(("record_step", input.step_seq, input.agent, input.skip_reason))
+        if input.skip_reason is not None:
+            return None
+        return input.raw_output
+
+    return [fake_security, fake_style, fake_test_coverage, fake_aggregate, fake_record_step]
 
 
 async def test_workflow_completes_normally_when_no_failure_injected():
@@ -97,6 +105,8 @@ async def test_workflow_completes_normally_when_no_failure_injected():
         assert result == 42
         assert ("check_failure_injection",) in calls
         assert calls[-1] == ("set_status", "complete")
+        assert ("record_step", 1, "fetch_diff", None) in calls
+        assert ("record_step", 5, "aggregate", None) in calls
 
 
 async def test_workflow_compensates_when_failure_injected():
@@ -235,6 +245,10 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
         async def unused_post_comment(input: PostCommentInput) -> int:
             raise AssertionError("should not be called")
 
+        @activity.defn(name="record_state_version_activity")
+        async def unused_record_step(input: RecordStepInput) -> str | None:
+            raise AssertionError("should not be called")
+
         async with Worker(
             env.client,
             task_queue="test-queue-6-4",
@@ -248,6 +262,7 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
                 unused_aggregate,
                 unused_check_staleness,
                 unused_post_comment,
+                unused_record_step,
             ],
         ):
             event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=8, head_sha="def456", installation_id="55")
@@ -261,3 +276,64 @@ async def test_workflow_marks_failed_when_activity_exhausts_retries():
                 )
 
         assert calls == ["running", "failed"]
+
+
+async def test_workflow_marks_failed_when_fetch_diff_output_contract_rejected():
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        calls = []
+
+        @activity.defn(name="set_review_status_activity")
+        async def fake_set_status(input: SetStatusInput) -> None:
+            calls.append(("set_status", input.status))
+
+        @activity.defn(name="fetch_diff_activity")
+        async def fake_fetch_diff(input: FetchDiffInput) -> str:
+            calls.append(("fetch_diff",))
+            return ""
+
+        @activity.defn(name="record_state_version_activity")
+        async def fake_record_step(input: RecordStepInput) -> str | None:
+            calls.append(("record_step", input.step_seq, input.agent))
+            return None
+
+        @activity.defn(name="security_review_activity")
+        async def unused_security(input: ReviewInput) -> str:
+            raise AssertionError("should not be called")
+
+        @activity.defn(name="style_review_activity")
+        async def unused_style(input: ReviewInput) -> str:
+            raise AssertionError("should not be called")
+
+        @activity.defn(name="test_coverage_review_activity")
+        async def unused_test_coverage(input: ReviewInput) -> str:
+            raise AssertionError("should not be called")
+
+        @activity.defn(name="post_comment_activity")
+        async def unused_post_comment(input: PostCommentInput) -> int:
+            raise AssertionError("should not be called")
+
+        async with Worker(
+            env.client,
+            task_queue="test-queue-8-1",
+            workflows=[PRReviewWorkflow],
+            activities=[
+                fake_set_status,
+                fake_fetch_diff,
+                fake_record_step,
+                unused_security,
+                unused_style,
+                unused_test_coverage,
+                unused_post_comment,
+            ],
+        ):
+            event = ReviewEvent(owner="chitaki10", repo="demo", pr_number=9, head_sha="ghi789", installation_id="55")
+
+            with pytest.raises(WorkflowFailureError):
+                await env.client.execute_workflow(
+                    PRReviewWorkflow.run,
+                    event,
+                    id="test-workflow-8-1",
+                    task_queue="test-queue-8-1",
+                )
+
+        assert calls == [("set_status", "running"), ("fetch_diff",), ("record_step", 1, "fetch_diff"), ("set_status", "failed")]

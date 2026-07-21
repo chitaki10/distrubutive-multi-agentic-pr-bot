@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 
-from prbot.events import PullRequestEvent, parse_pull_request_event, verify_signature
+from prbot.api.events import PullRequestEvent, parse_pull_request_event, verify_signature
 
 
 def test_verify_signature_accepts_valid_signature():

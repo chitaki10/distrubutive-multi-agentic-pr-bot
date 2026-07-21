@@ -45,10 +45,10 @@ if ($ForceFailureAfterPost) {
 } else {
     Remove-Item Env:\PRBOT_DEMO_FORCE_FAILURE_AFTER_POST -ErrorAction SilentlyContinue
 }
-$workerProc = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "-NoProfile", "-Command", ".venv\Scripts\python -m prbot.worker"
+$workerProc = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "-NoProfile", "-Command", ".venv\Scripts\python -m prbot.orchestration.worker"
 
 Write-Host "== Starting webhook server (localhost:8000) ==" -ForegroundColor Cyan
-$webhookProc = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "-NoProfile", "-Command", ".venv\Scripts\uvicorn prbot.app:app --port 8000"
+$webhookProc = Start-Process -PassThru -WindowStyle Hidden powershell -ArgumentList "-NoProfile", "-Command", ".venv\Scripts\uvicorn prbot.api.app:app --port 8000"
 
 $smeeProc = $null
 if ($SmeeUrl) {

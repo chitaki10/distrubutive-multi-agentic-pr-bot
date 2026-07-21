@@ -11,6 +11,7 @@ from prbot.activity_types import (
     DeleteCommentInput,
     FetchDiffInput,
     PostCommentInput,
+    RecordStepInput,
     ReviewInput,
     SetStatusInput,
     StalenessCheckInput,
@@ -31,6 +32,7 @@ class PRReviewWorkflow:
     @workflow.run
     async def run(self, event: ReviewEvent) -> int:
         retry_policy = RetryPolicy(maximum_attempts=3)
+        workflow_id = workflow.info().workflow_id
 
         async def set_status(status: str) -> None:
             await workflow.execute_activity(
@@ -40,10 +42,27 @@ class PRReviewWorkflow:
                 retry_policy=retry_policy,
             )
 
+        async def record_step(
+            step_seq: int, agent: str, raw_output: str | None, skip_reason: str | None, reference_text: str | None
+        ) -> str | None:
+            return await workflow.execute_activity(
+                "record_state_version_activity",
+                RecordStepInput(
+                    workflow_id=workflow_id,
+                    step_seq=step_seq,
+                    agent=agent,
+                    raw_output=raw_output,
+                    skip_reason=skip_reason,
+                    reference_text=reference_text,
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=retry_policy,
+            )
+
         await set_status("running")
 
         try:
-            diff = await workflow.execute_activity(
+            raw_diff = await workflow.execute_activity(
                 "fetch_diff_activity",
                 FetchDiffInput(
                     installation_id=event.installation_id,
@@ -55,8 +74,13 @@ class PRReviewWorkflow:
                 retry_policy=retry_policy,
             )
 
+            diff = await record_step(1, "fetch_diff", raw_diff, None, None)
+            if diff is None:
+                await set_status("failed")
+                raise ApplicationError("Contract rejected fetch_diff output", non_retryable=True)
+
             review_input = ReviewInput(diff_text=diff)
-            security_result, style_result, test_coverage_result = await asyncio.gather(
+            raw_security, raw_style, raw_test_coverage = await asyncio.gather(
                 workflow.execute_activity(
                     "security_review_activity",
                     review_input,
@@ -77,6 +101,24 @@ class PRReviewWorkflow:
                 ),
             )
 
+            security_result, style_result, test_coverage_result = await asyncio.gather(
+                record_step(
+                    2, "security_review", raw_security,
+                    None if raw_security is not None else "circuit_breaker_open",
+                    diff,
+                ),
+                record_step(
+                    3, "style_review", raw_style,
+                    None if raw_style is not None else "circuit_breaker_open",
+                    diff,
+                ),
+                record_step(
+                    4, "test_coverage_review", raw_test_coverage,
+                    None if raw_test_coverage is not None else "circuit_breaker_open",
+                    diff,
+                ),
+            )
+
             review_body = await workflow.execute_activity(
                 "aggregate_activity",
                 AggregateInput(
@@ -87,6 +129,8 @@ class PRReviewWorkflow:
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_policy,
             )
+
+            await record_step(5, "aggregate", review_body, None, None)
 
             is_stale = await workflow.execute_activity(
                 "check_staleness_activity",

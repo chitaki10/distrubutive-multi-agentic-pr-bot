@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException, Request
 from temporalio.client import Client
 
 from prbot.config import get_settings
-from prbot.events import parse_pull_request_event, verify_signature
-from prbot.workflows import PRReviewWorkflow, ReviewEvent
+from prbot.api.events import parse_pull_request_event, verify_signature
+from prbot.orchestration.workflows import PRReviewWorkflow, ReviewEvent
 
 TASK_QUEUE = "pr-review-task-queue"
 

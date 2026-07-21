@@ -5,8 +5,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from prbot import app as app_module
-from prbot.workflows import PRReviewWorkflow, ReviewEvent
+from prbot.api import app as app_module
+from prbot.orchestration.workflows import PRReviewWorkflow, ReviewEvent
 
 
 def _sign(body: bytes, secret: str) -> str:

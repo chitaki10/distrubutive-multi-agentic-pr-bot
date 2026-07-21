@@ -53,3 +53,13 @@ class DeleteCommentInput:
     owner: str
     repo: str
     comment_id: int
+
+
+@dataclass
+class RecordStepInput:
+    workflow_id: str
+    step_seq: int
+    agent: str
+    raw_output: str | None
+    skip_reason: str | None
+    reference_text: str | None

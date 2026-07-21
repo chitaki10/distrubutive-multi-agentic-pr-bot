@@ -1,8 +1,8 @@
 import logging
 
-from prbot import github_client, llm_client
+from prbot.integrations import github_client, llm_client
 from prbot.config import Settings
-from prbot.events import PullRequestEvent
+from prbot.api.events import PullRequestEvent
 
 logger = logging.getLogger(__name__)
 

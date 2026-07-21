@@ -14,6 +14,7 @@ Built stage by stage; each stage is demoable on its own.
 - ✅ **Stage 5 — Circuit breaker**: each agent's Ollama calls go through its own `pybreaker` circuit breaker. A repeatedly-failing agent gets skipped (its section says "check skipped") instead of retrying forever or hanging the whole review.
 - ✅ **Stage 6 — Saga/compensation**: if something fails after a comment has already been posted, a compensating activity deletes it and marks the run failed, rather than leaving a broken half-review visible. (A demo-only, env-var-gated hook makes this reproducible on demand — see below.)
 - ✅ **Stage 7 — Polish**: this README, `scripts/demo.ps1`.
+- ✅ **Stage 8 — Versioned state log + data contract gate**: an append-only `pr_review_state_versions` table records one immutable row per agent handoff (fetch_diff → security/style/test-coverage → aggregate); each handoff is validated by a lightweight content contract (non-empty, bounded length, not an echo of the input diff, not an error string) before being passed downstream — a rejected output is treated like a circuit-breaker skip. `scripts/replay_state.py <workflow_id>` replays a run's full step-by-step lineage. Also reorganized `src/prbot` from a flat file list into responsibility-based subpackages (`orchestration/`, `agents/`, `state/`, `contracts/`, `integrations/`, `api/`).
 
 Full design: [`docs/superpowers/specs/2026-07-19-pr-review-bot-design.md`](docs/superpowers/specs/2026-07-19-pr-review-bot-design.md). Per-stage implementation plans and E2E verification records: [`docs/superpowers/plans/`](docs/superpowers/plans/).
 
@@ -60,8 +61,8 @@ python -m venv .venv
 docker-compose up -d          # Postgres
 temporal server start-dev     # Temporal dev server + Web UI at localhost:8233
 
-.venv/Scripts/python -m prbot.worker      # Temporal worker
-.venv/Scripts/uvicorn prbot.app:app --port 8000   # webhook server
+.venv/Scripts/python -m prbot.orchestration.worker      # Temporal worker
+.venv/Scripts/uvicorn prbot.api.app:app --port 8000   # webhook server
 ```
 
 Or, on Windows, use the demo script to start everything at once:

@@ -1,6 +1,6 @@
 import pytest
 
-from prbot import db
+from prbot.state import db
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +18,14 @@ async def test_init_db_creates_table():
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT to_regclass('public.pr_reviews') AS exists")
     assert row["exists"] == "pr_reviews"
+
+
+async def test_init_db_creates_state_versions_table():
+    await db.init_db()
+    pool = await db._get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT to_regclass('public.pr_review_state_versions') AS exists")
+    assert row["exists"] == "pr_review_state_versions"
 
 
 async def test_set_review_status_inserts_and_updates():

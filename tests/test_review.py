@@ -1,6 +1,6 @@
 from prbot import review
 from prbot.config import Settings
-from prbot.events import PullRequestEvent
+from prbot.api.events import PullRequestEvent
 
 
 def _settings():

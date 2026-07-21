@@ -4,7 +4,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import jwt
 
-from prbot.github_client import generate_app_jwt, get_installation_token
+from prbot.integrations.github_client import generate_app_jwt, get_installation_token
 
 
 def _generate_test_keypair():

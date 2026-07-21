@@ -1,7 +1,7 @@
 import httpx
 import respx
 
-from prbot.github_client import delete_pr_comment, fetch_pr_diff, get_pr_head_sha, post_pr_comment
+from prbot.integrations.github_client import delete_pr_comment, fetch_pr_diff, get_pr_head_sha, post_pr_comment
 
 
 @respx.mock

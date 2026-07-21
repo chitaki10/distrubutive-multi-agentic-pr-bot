@@ -3,7 +3,7 @@ import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from prbot.activities import (
+from prbot.agents.activities import (
     aggregate_activity,
     check_demo_failure_injection_activity,
     check_staleness_activity,
@@ -11,13 +11,14 @@ from prbot.activities import (
     fetch_diff_activity,
     post_comment_activity,
     review_activity,
-    security_review_activity,
     set_review_status_activity,
-    style_review_activity,
-    test_coverage_review_activity,
 )
-from prbot.db import init_db
-from prbot.workflows import PRReviewWorkflow
+from prbot.agents.security import security_review_activity
+from prbot.agents.style import style_review_activity
+from prbot.agents.test_coverage import test_coverage_review_activity
+from prbot.state.db import init_db
+from prbot.state.versioned_log import record_state_version_activity
+from prbot.orchestration.workflows import PRReviewWorkflow
 
 TASK_QUEUE = "pr-review-task-queue"
 
@@ -41,6 +42,7 @@ async def main() -> None:
             check_staleness_activity,
             check_demo_failure_injection_activity,
             delete_comment_activity,
+            record_state_version_activity,
         ],
     )
     await worker.run()

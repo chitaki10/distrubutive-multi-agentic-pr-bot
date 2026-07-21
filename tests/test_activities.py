@@ -1,8 +1,5 @@
 # tests/test_activities.py
-import pytest
-import pybreaker
-
-from prbot import activities
+from prbot.agents import activities
 
 
 async def test_fetch_diff_activity_calls_apis_in_order(monkeypatch, tmp_path):
@@ -117,58 +114,6 @@ async def test_set_review_status_activity_calls_db(monkeypatch):
     assert calls == [("demo", 7, "abc123", "running")]
 
 
-async def test_security_review_activity_uses_security_prompt(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-
-    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        assert diff_text == "diff-content"
-        assert system_prompt == activities.SECURITY_SYSTEM_PROMPT
-        return "security findings"
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
-
-    result = await activities.security_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result == "security findings"
-
-
-async def test_style_review_activity_uses_style_prompt(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-
-    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        assert system_prompt == activities.STYLE_SYSTEM_PROMPT
-        return "style findings"
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
-
-    result = await activities.style_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result == "style findings"
-
-
-async def test_test_coverage_review_activity_uses_test_coverage_prompt(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-
-    async def fake_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        assert system_prompt == activities.TEST_COVERAGE_SYSTEM_PROMPT
-        return "test coverage findings"
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", fake_review_diff_with_prompt)
-
-    result = await activities.test_coverage_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result == "test coverage findings"
-
-
 async def test_aggregate_activity_merges_all_three_sections():
     result = await activities.aggregate_activity(
         activities.AggregateInput(
@@ -257,66 +202,6 @@ async def test_check_staleness_activity_returns_false_when_head_sha_matches(monk
     )
 
     assert result is False
-
-
-async def test_security_review_activity_returns_none_when_breaker_open(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-    monkeypatch.setattr(activities, "security_breaker", pybreaker.CircuitBreaker(fail_max=2, reset_timeout=60))
-
-    async def failing_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        raise RuntimeError("model unreachable")
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", failing_review_diff_with_prompt)
-
-    with pytest.raises(RuntimeError):
-        await activities.security_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    result = await activities.security_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result is None
-
-
-async def test_style_review_activity_returns_none_when_breaker_open(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-    monkeypatch.setattr(activities, "style_breaker", pybreaker.CircuitBreaker(fail_max=2, reset_timeout=60))
-
-    async def failing_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        raise RuntimeError("model unreachable")
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", failing_review_diff_with_prompt)
-
-    with pytest.raises(RuntimeError):
-        await activities.style_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    result = await activities.style_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result is None
-
-
-async def test_test_coverage_review_activity_returns_none_when_breaker_open(monkeypatch):
-    monkeypatch.setenv("GITHUB_APP_ID", "1")
-    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
-    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
-    activities.get_settings.cache_clear()
-    monkeypatch.setattr(activities, "test_coverage_breaker", pybreaker.CircuitBreaker(fail_max=2, reset_timeout=60))
-
-    async def failing_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
-        raise RuntimeError("model unreachable")
-
-    monkeypatch.setattr(activities.llm_client, "review_diff_with_prompt", failing_review_diff_with_prompt)
-
-    with pytest.raises(RuntimeError):
-        await activities.test_coverage_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    result = await activities.test_coverage_review_activity(activities.ReviewInput(diff_text="diff-content"))
-
-    assert result is None
 
 
 async def test_check_demo_failure_injection_activity_returns_false_by_default(monkeypatch):

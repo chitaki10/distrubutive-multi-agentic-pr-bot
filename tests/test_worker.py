@@ -1,4 +1,4 @@
-from prbot import worker
+from prbot.orchestration import worker
 
 
 async def test_main_wires_db_client_and_worker_together(monkeypatch):
@@ -45,5 +45,6 @@ async def test_main_wires_db_client_and_worker_together(monkeypatch):
         worker.check_staleness_activity,
         worker.check_demo_failure_injection_activity,
         worker.delete_comment_activity,
+        worker.record_state_version_activity,
     ]
     assert calls[3] == "worker_run"

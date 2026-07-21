@@ -1,7 +1,7 @@
 import httpx
 import respx
 
-from prbot.llm_client import review_diff, review_diff_with_prompt
+from prbot.integrations.llm_client import review_diff, review_diff_with_prompt
 
 
 @respx.mock
