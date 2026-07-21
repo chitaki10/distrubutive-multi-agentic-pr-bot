@@ -181,3 +181,42 @@ Decided together when brainstorming the remaining stages in one pass, since the 
 **Stage 6 — saga triggered by a demo-only failure-injection activity.** In the current pipeline, `post_comment_activity` is the last side-effecting step before the final `set_review_status_activity("complete")` call — there's no naturally-occurring "later activity fails after an earlier partial post" scenario to demo without manufacturing one. Add `check_demo_failure_injection_activity() -> bool`, reading an env var (`PRBOT_DEMO_FORCE_FAILURE_AFTER_POST`) — activities can freely do I/O/env reads (unlike workflow code, which must stay deterministic). Called right after `post_comment_activity` succeeds; if it returns `True`, the workflow raises, triggering compensation: `delete_comment_activity(DeleteCommentInput) -> None` (new `github_client.delete_pr_comment(token, owner, repo, comment_id) -> None`) removes the just-posted comment, then `set_status("failed")`, then re-raise. This gives a reliably reproducible demo (flip the env var, push, watch the comment appear and then get deleted) without depending on genuine flakiness.
 
 **Stage 7 — polish, lighter process.** README and demo script are documentation/tooling, not core logic — handled as direct edits rather than full subagent-driven-development ceremony, proportional to the risk (low) of getting them wrong.
+
+## Stage 8 — Versioned state log + data contract gate (folder reorg)
+
+Added after all 7 stages were complete, in response to a gap-analysis against a conference talk on production multi-agent patterns: the project already had orchestration, circuit breakers, retries, and saga compensation, but no per-agent-step immutable version history and no validation gate on agent output content (only shape, via dataclasses). This closes both gaps and reorganizes the flat `src/prbot/*.py` layout into responsibility-based subpackages.
+
+**Folder reorg.** Pure move + import-path fixup, no behavior change, verified by the full test suite staying green on the move alone before new logic lands:
+```
+src/prbot/
+  orchestration/  workflows.py, worker.py
+  agents/         activities.py (fetch_diff/post_comment/set_status/aggregate/staleness/demo-injection/delete-comment/legacy review), security.py, style.py, test_coverage.py (each split out with its own prompt + breaker)
+  state/          db.py, versioned_log.py (new)
+  contracts/      schemas.py (new), validation.py (new)
+  integrations/   github_client.py, llm_client.py
+  api/            app.py, events.py
+  config.py, activity_types.py   -- stay at root, shared by everything
+```
+
+**Versioned state log.** New append-only table, one row per data-producing handoff (not every activity — status-only and side-effect-only steps like `set_status`/`post_comment`/`staleness_check` don't produce data another agent consumes, so they're excluded):
+```sql
+CREATE TABLE IF NOT EXISTS pr_review_state_versions (
+    id BIGSERIAL PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    step_seq INTEGER NOT NULL,
+    agent TEXT NOT NULL,
+    status TEXT NOT NULL,        -- 'ok' | 'circuit_breaker_open' | 'contract_rejected:<reason>'
+    output TEXT,                  -- null unless status='ok'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (workflow_id, step_seq)
+);
+```
+`step_seq` 1=fetch_diff, 2=security_review, 3=style_review, 4=test_coverage_review, 5=aggregate. `workflow_id` reuses Temporal's own workflow ID (`owner/repo#pr@sha`, via `workflow.info().workflow_id` inside workflow code — deterministic, no new ID scheme). Insert-only by convention (no code path issues an UPDATE/DELETE against this table) — ordering by `step_seq` within a `workflow_id` reconstructs the full per-run agent lineage for replay/debugging.
+
+**Contract gate.** `contracts/validation.py::validate_agent_output(output: str, *, reference_text: str | None) -> ContractResult` — lightweight heuristics on the output envelope, not a structured-JSON/confidence-score contract (the review agents produce free-form markdown by design, and forcing structured output onto the 3B local model was judged a needless prompt-engineering risk for this gap-fix). Rejects: empty/whitespace-only; length <20 or >20000 chars; output identical to `reference_text` (the diff, for review-step echo detection); output starting with `Traceback`/`Error:`. `ContractResult`/thresholds live in `contracts/schemas.py`.
+
+**Wiring.** New `record_state_version_activity` (in `state/versioned_log.py`, registered in `worker.py` per the standing global constraint) does validation + the INSERT in one activity call — no extra Temporal round-trip beyond the write itself. Workflow calls it explicitly after each data-producing activity, mirroring the orchestrator-owns-state-versioning shape: after `fetch_diff_activity` (step 1) — since a contract rejection here comes back as a normal (non-exceptional) `None` result, not an `ActivityError`, the workflow explicitly checks for it (same explicit-check shape as Stage 6's demo-injection check) and if rejected, aborts itself: `set_status("failed")`, raise `ApplicationError`; after the 3 concurrent reviews (steps 2-4, recorded concurrently, each already `None` from a tripped breaker skips validation and records `circuit_breaker_open` directly) — the *validated* result (possibly newly-`None` from a contract rejection) replaces the raw one before `aggregate_activity` runs, so a contract-rejected section shows "check skipped" exactly like a breaker-open one; after `aggregate_activity` (step 5, always accepted in practice, recorded for lineage completeness).
+
+**Debug tooling.** `scripts/replay_state.py <workflow_id>` — queries `pr_review_state_versions` for that workflow_id, prints step_seq/agent/status/output(truncated) in order. Concrete demo of the "replay version history to binary-search a regression" capability the talk calls out.
+
+**Testing.** Unit tests for `validate_agent_output` (all 4 reject paths + accept), `versioned_log.record_step`/query (same autouse pool-reset fixture pattern as `test_db.py`), updated `test_workflows.py` (fake worker now registers `record_state_version_activity`), updated `test_activities.py` for the new recording call sites. Live E2E: push a real PR, confirm 5 rows land in `pr_review_state_versions` in the right order; separately force a contract rejection (e.g. temporarily feed a review activity output identical to its diff) and confirm `status='contract_rejected:...'` is recorded and the section reads "check skipped" in the posted comment.
