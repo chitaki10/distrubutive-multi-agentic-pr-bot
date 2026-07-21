@@ -1,5 +1,13 @@
 # Multi-Agent GitHub PR Review Bot
 
+![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Webhook%20Service-009688?logo=fastapi&logoColor=white)
+![Temporal](https://img.shields.io/badge/Temporal-Workflow%20Orchestration-000000?logo=temporal&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-asyncpg-336791?logo=postgresql&logoColor=white)
+![Ollama](https://img.shields.io/badge/LLM-Ollama%20qwen2.5--coder-white?logo=ollama&logoColor=black)
+![pybreaker](https://img.shields.io/badge/Resilience-pybreaker%20Circuit%20Breaker-orange)
+![GitHub App](https://img.shields.io/badge/Auth-GitHub%20App-181717?logo=github&logoColor=white)
+
 A self-hosted GitHub PR review bot: open or update a pull request, and the bot fans out to three specialized agents (Security, Style, Test Coverage), each backed by a locally-running open-weight LLM, merges their findings into one comment, and posts it back to the PR — durably. Built to demonstrate real distributed-systems patterns (durable workflow orchestration, versioned state, staleness handling, circuit breaking, saga compensation) around a multi-agent LLM pipeline. Fully open source, no hosted model APIs required.
 
 ## Status
@@ -19,6 +27,29 @@ Built stage by stage; each stage is demoable on its own.
 Full design: [`docs/superpowers/specs/2026-07-19-pr-review-bot-design.md`](docs/superpowers/specs/2026-07-19-pr-review-bot-design.md). Per-stage implementation plans and E2E verification records: [`docs/superpowers/plans/`](docs/superpowers/plans/).
 
 ## Architecture
+
+```mermaid
+flowchart TD
+    A["GitHub PR opened / synchronize"] -->|"webhook POST, HMAC-signed"| B["FastAPI webhook-service<br/>verify signature -> start Temporal workflow -> ack immediately"]
+    B --> C["Temporal Server (local dev)"]
+    C --> D["Temporal Worker: PRReviewWorkflow"]
+    D --> E["fetch_diff (GitHub App installation token)"]
+    E --> F1["Security agent<br/>Ollama + circuit breaker"]
+    E --> F2["Style agent<br/>Ollama + circuit breaker"]
+    E --> F3["Test-Coverage agent<br/>Ollama + circuit breaker"]
+    F1 --> G["aggregate: merge (possibly partial) results into one comment"]
+    F2 --> G
+    F3 --> G
+    G --> H{"staleness check:<br/>PR HEAD SHA still matches?"}
+    H -->|"no, stale"| I["abort -- mark run stale, don't post"]
+    H -->|"yes, current"| J["post comment to GitHub"]
+    J --> K{"(demo-only) failure<br/>injection triggered?"}
+    K -->|"yes"| L["delete comment (saga compensation) -- mark run failed"]
+    K -->|"no"| M["mark run complete"]
+    D -.->|"one immutable row per step"| N[("Postgres:<br/>pr_reviews (status) +<br/>pr_review_state_versions (versioned lineage)")]
+```
+
+Text version of the same flow:
 
 ```
 GitHub PR (opened/synchronize)
