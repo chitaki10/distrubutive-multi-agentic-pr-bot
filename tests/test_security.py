@@ -1,7 +1,7 @@
-import pybreaker
 import pytest
 
 from prbot.agents import security
+from prbot.circuit_breaker import CircuitBreaker
 
 
 async def test_security_review_activity_uses_security_prompt(monkeypatch):
@@ -27,7 +27,7 @@ async def test_security_review_activity_returns_none_when_breaker_open(monkeypat
     monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", "unused.pem")
     monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "unused")
     security.get_settings.cache_clear()
-    monkeypatch.setattr(security, "security_breaker", pybreaker.CircuitBreaker(fail_max=2, reset_timeout=60))
+    monkeypatch.setattr(security, "security_breaker", CircuitBreaker(fail_max=2, reset_timeout=60))
 
     async def failing_review_diff_with_prompt(diff_text, base_url, model, system_prompt):
         raise RuntimeError("model unreachable")

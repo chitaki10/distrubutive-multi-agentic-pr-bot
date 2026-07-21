@@ -11,8 +11,6 @@ dependencies = [
     "pydantic-settings>=2.5",
     "temporalio>=1.7,<2",
     "asyncpg>=0.29,<1",
-    "pybreaker>=1.4,<2",
-    "tornado>=6.0,<7",
 ]
 
 [project.optional-dependencies]

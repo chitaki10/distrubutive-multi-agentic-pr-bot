@@ -5,7 +5,7 @@
 ![Temporal](https://img.shields.io/badge/Temporal-Workflow%20Orchestration-000000?logo=temporal&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-asyncpg-336791?logo=postgresql&logoColor=white)
 ![Ollama](https://img.shields.io/badge/LLM-Ollama%20qwen2.5--coder-white?logo=ollama&logoColor=black)
-![pybreaker](https://img.shields.io/badge/Resilience-pybreaker%20Circuit%20Breaker-orange)
+![Circuit Breaker](https://img.shields.io/badge/Resilience-Vanilla%20Python%20Circuit%20Breaker-orange)
 ![GitHub App](https://img.shields.io/badge/Auth-GitHub%20App-181717?logo=github&logoColor=white)
 
 A self-hosted GitHub PR review bot: open or update a pull request, and the bot fans out to three specialized agents (Security, Style, Test Coverage), each backed by a locally-running open-weight LLM, merges their findings into one comment, and posts it back to the PR — durably. Built to demonstrate real distributed-systems patterns (durable workflow orchestration, versioned state, staleness handling, circuit breaking, saga compensation) around a multi-agent LLM pipeline. Fully open source, no hosted model APIs required.
@@ -19,7 +19,7 @@ Built stage by stage; each stage is demoable on its own.
 - ✅ **Stage 2 — Temporal durability**: webhook fast-acks by starting a Temporal workflow instead of blocking; a separate worker process runs the review pipeline as retryable activities, with status tracked in Postgres (`pending → running → complete/failed`). Kill the worker mid-review and restart it — the review resumes and still posts.
 - ✅ **Stage 3 — Multi-agent review**: three activities (Security / Style / Test-Coverage), each with a distinct prompt, run concurrently via `asyncio.gather`; an aggregator merges the three results into one comment with three sections.
 - ✅ **Stage 4 — Staleness handling**: right before posting, the workflow re-checks the PR's current HEAD SHA. A force-push mid-review discards the stale run instead of posting an outdated comment; the newer push's own independent workflow posts the current review.
-- ✅ **Stage 5 — Circuit breaker**: each agent's Ollama calls go through its own `pybreaker` circuit breaker. A repeatedly-failing agent gets skipped (its section says "check skipped") instead of retrying forever or hanging the whole review.
+- ✅ **Stage 5 — Circuit breaker**: each agent's Ollama calls go through its own circuit breaker (`src/prbot/circuit_breaker.py` — originally `pybreaker`, replaced with a small vanilla-Python implementation, see below). A repeatedly-failing agent gets skipped (its section says "check skipped") instead of retrying forever or hanging the whole review.
 - ✅ **Stage 6 — Saga/compensation**: if something fails after a comment has already been posted, a compensating activity deletes it and marks the run failed, rather than leaving a broken half-review visible. (A demo-only, env-var-gated hook makes this reproducible on demand — see below.)
 - ✅ **Stage 7 — Polish**: this README, `scripts/demo.ps1`.
 - ✅ **Stage 8 — Versioned state log + data contract gate**: an append-only `pr_review_state_versions` table records one immutable row per agent handoff (fetch_diff → security/style/test-coverage → aggregate); each handoff is validated by a lightweight content contract (non-empty, bounded length, not an echo of the input diff, not an error string) before being passed downstream — a rejected output is treated like a circuit-breaker skip. `scripts/replay_state.py <workflow_id>` replays a run's full step-by-step lineage. Also reorganized `src/prbot` from a flat file list into responsibility-based subpackages (`orchestration/`, `agents/`, `state/`, `contracts/`, `integrations/`, `api/`).
@@ -80,7 +80,7 @@ Temporal Worker — hosts the PRReviewWorkflow + activities:
 - **Temporal** (`temporalio`) — durable workflow orchestration, retries, concurrent activity fan-out
 - **Postgres** (`asyncpg`) — versioned review state, keyed by `(repo, pr_number, head_sha)`
 - **Ollama** — local, open-weight model serving (`qwen2.5-coder:3b`, swappable to vLLM later without touching agent code)
-- **pybreaker** (+ `tornado`, a real internal dependency of pybreaker's async support) — per-agent circuit breakers
+- **Circuit breaker** (`src/prbot/circuit_breaker.py`, hand-rolled, zero dependencies) — per-agent circuit breakers; originally `pybreaker`, replaced after it turned out to need `tornado` as an undeclared internal dependency for its async support
 - **GitHub App** — scoped installation auth, not a personal access token
 
 ## Running locally

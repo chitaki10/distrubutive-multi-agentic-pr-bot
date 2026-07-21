@@ -1,6 +1,6 @@
-import pybreaker
 from temporalio import activity
 
+from prbot.circuit_breaker import CircuitBreaker, CircuitBreakerError
 from prbot.integrations import llm_client
 from prbot.activity_types import ReviewInput
 from prbot.config import get_settings
@@ -11,7 +11,7 @@ STYLE_SYSTEM_PROMPT = (
     "issues. Keep it under 150 words. If there are no concerns, say so briefly."
 )
 
-style_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+style_breaker = CircuitBreaker(fail_max=3, reset_timeout=60)
 
 
 @activity.defn
@@ -28,5 +28,5 @@ async def style_review_activity(input: ReviewInput) -> str | None:
 
     try:
         return await style_breaker.call_async(_review_call)
-    except pybreaker.CircuitBreakerError:
+    except CircuitBreakerError:
         return None
