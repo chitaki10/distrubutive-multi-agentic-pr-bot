@@ -84,6 +84,28 @@ async def test_record_state_version_activity_rejects_echoed_diff():
     assert steps[0]["status"] == "contract_rejected:echoed_input"
 
 
+async def test_record_state_version_activity_accepts_large_diff_when_length_check_skipped():
+    await db.init_db()
+    workflow_id = "test-owner/test-repo#9007@sha-versioned-log-6"
+    huge_diff = "diff --git a/x.py b/x.py\n+print(1)\n" * 2000
+
+    result = await versioned_log.record_state_version_activity(
+        RecordStepInput(
+            workflow_id=workflow_id,
+            step_seq=1,
+            agent="fetch_diff",
+            raw_output=huge_diff,
+            skip_reason=None,
+            reference_text=None,
+            skip_length_check=True,
+        )
+    )
+
+    assert result == huge_diff
+    steps = await versioned_log.get_steps_for_workflow(workflow_id)
+    assert steps[0]["status"] == "ok"
+
+
 async def test_record_state_version_activity_records_circuit_breaker_skip():
     await db.init_db()
     workflow_id = "test-owner/test-repo#9006@sha-versioned-log-5"

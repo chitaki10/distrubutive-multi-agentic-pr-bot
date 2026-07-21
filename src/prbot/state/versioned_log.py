@@ -1,6 +1,7 @@
 from temporalio import activity
 
 from prbot.activity_types import RecordStepInput
+from prbot.contracts.schemas import MAX_OUTPUT_LEN
 from prbot.contracts.validation import validate_agent_output
 from prbot.state import db
 
@@ -38,7 +39,11 @@ async def record_state_version_activity(input: RecordStepInput) -> str | None:
     if input.skip_reason is not None:
         status, output = input.skip_reason, None
     else:
-        result = validate_agent_output(input.raw_output, reference_text=input.reference_text)
+        result = validate_agent_output(
+            input.raw_output,
+            reference_text=input.reference_text,
+            max_len=None if input.skip_length_check else MAX_OUTPUT_LEN,
+        )
         if result.accepted:
             status, output = "ok", input.raw_output
         else:

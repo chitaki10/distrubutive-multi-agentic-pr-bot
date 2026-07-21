@@ -36,3 +36,9 @@ def test_accepts_reasonable_review_text():
     result = validate_agent_output("No security concerns found in this diff. Looks good to merge.")
     assert result.accepted is True
     assert result.reason is None
+
+
+def test_accepts_long_output_when_max_len_disabled():
+    huge_diff = "diff --git a/x.py b/x.py\n+print(1)\n" * 2000
+    result = validate_agent_output(huge_diff, max_len=None)
+    assert result.accepted is True

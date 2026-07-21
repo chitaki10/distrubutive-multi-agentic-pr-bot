@@ -43,7 +43,12 @@ class PRReviewWorkflow:
             )
 
         async def record_step(
-            step_seq: int, agent: str, raw_output: str | None, skip_reason: str | None, reference_text: str | None
+            step_seq: int,
+            agent: str,
+            raw_output: str | None,
+            skip_reason: str | None,
+            reference_text: str | None,
+            skip_length_check: bool = False,
         ) -> str | None:
             return await workflow.execute_activity(
                 "record_state_version_activity",
@@ -54,6 +59,7 @@ class PRReviewWorkflow:
                     raw_output=raw_output,
                     skip_reason=skip_reason,
                     reference_text=reference_text,
+                    skip_length_check=skip_length_check,
                 ),
                 start_to_close_timeout=timedelta(seconds=10),
                 retry_policy=retry_policy,
@@ -74,7 +80,7 @@ class PRReviewWorkflow:
                 retry_policy=retry_policy,
             )
 
-            diff = await record_step(1, "fetch_diff", raw_diff, None, None)
+            diff = await record_step(1, "fetch_diff", raw_diff, None, None, skip_length_check=True)
             if diff is None:
                 await set_status("failed")
                 raise ApplicationError("Contract rejected fetch_diff output", non_retryable=True)

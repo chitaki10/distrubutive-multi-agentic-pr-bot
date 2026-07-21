@@ -63,3 +63,4 @@ class RecordStepInput:
     raw_output: str | None
     skip_reason: str | None
     reference_text: str | None
+    skip_length_check: bool = False
